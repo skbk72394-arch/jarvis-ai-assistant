@@ -1,0 +1,70 @@
+{
+  "expo": {
+    "name": "JARVIS",
+    "slug": "jarvis-ai-assistant",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "scheme": "jarvis",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0a0a0f"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.jarvis.assistant",
+      "buildNumber": "1.0.0",
+      "infoPlist": {
+        "NSSpeechRecognitionUsageDescription": "JARVIS needs speech recognition to understand your voice commands.",
+        "NSMicrophoneUsageDescription": "JARVIS needs microphone access for voice input.",
+        "NSCameraUsageDescription": "JARVIS needs camera access to capture images for analysis.",
+        "NSPhotoLibraryUsageDescription": "JARVIS needs photo library access to upload images."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0a0a0f"
+      },
+      "package": "com.jarvis.assistant",
+      "versionCode": 1,
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.INTERNET"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "JARVIS needs access to your photos to upload and analyze images.",
+          "cameraPermission": "JARVIS needs access to your camera to capture images."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "JARVIS needs camera access for hand gesture tracking."
+        }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "JARVIS needs access to your microphone for voice input."
+        }
+      ]
+    ]
+  }
+}
