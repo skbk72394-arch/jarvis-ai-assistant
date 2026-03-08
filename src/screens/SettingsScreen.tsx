@@ -23,6 +23,7 @@ import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS, SPACING, BORDER_RADIUS } from '../constants/theme';
 import { APIKeyManager, APIKey } from '../utils/api';
+import { useAPIKeysStore } from '../stores';
 import NativeBridge, {
   VpnBridge,
   ShizukuBridge,
@@ -185,6 +186,9 @@ export const SettingsScreen: React.FC = () => {
     claude: '',
     deepseek: '',
   });
+  
+  // Get zustand store actions to sync state
+  const { setKeys: setZustandKeys } = useAPIKeysStore();
 
   const [permissions, setPermissions] = useState({
     accessibility: 'unknown' as PermissionStatus,
@@ -236,6 +240,8 @@ export const SettingsScreen: React.FC = () => {
     try {
       const keys = await APIKeyManager.getKeys();
       setApiKeys(keys);
+      // Also sync zustand store on load
+      setZustandKeys(keys);
     } catch (error) {
       console.error('Failed to load settings:', error);
     }
@@ -246,7 +252,12 @@ export const SettingsScreen: React.FC = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     try {
+      // Save to AsyncStorage
       await APIKeyManager.saveKeys(apiKeys);
+      
+      // CRITICAL: Also update zustand store for immediate UI sync
+      setZustandKeys(apiKeys);
+      
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert('Saved', 'API keys saved successfully!', [{ text: 'OK' }]);
     } catch (error) {

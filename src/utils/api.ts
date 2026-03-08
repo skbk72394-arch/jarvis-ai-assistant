@@ -199,8 +199,10 @@ export const MODEL_CATEGORIES = {
 };
 
 // ==================== API KEY STORAGE ====================
+// CRITICAL: Must match the storage key in stores/index.ts useAPIKeysStore
+// Both use 'jarvis-api-keys' (hyphen, not underscore)
 
-const API_KEYS_STORAGE_KEY = 'jarvis_api_keys';
+const API_KEYS_STORAGE_KEY = 'jarvis-api-keys';
 
 export const APIKeyManager = {
   async getKeys(): Promise<APIKey> {

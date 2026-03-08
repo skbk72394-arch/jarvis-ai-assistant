@@ -3,8 +3,9 @@
  * 
  * This plugin automatically configures native Android code during prebuild:
  * 1. Injects Accessibility and VPN service declarations into AndroidManifest.xml
- * 2. Registers JarvisPackage in MainApplication.java (or MainApplication.kt)
- * 3. Copies native Kotlin module files from src/native/android to the generated project
+ * 2. Adds Shizuku permission for elevated privileges
+ * 3. Registers JarvisPackage in MainApplication.java (or MainApplication.kt)
+ * 4. Copies native Kotlin module files from src/native/android to the generated project
  * 
  * Usage in app.json:
  * {
@@ -25,6 +26,32 @@ const withJarvisManifest = (config) => {
   return withAndroidManifest(config, (config) => {
     const manifest = config.modResults;
     
+    // ==================== ADD PERMISSIONS ====================
+    // Ensure manifest has 'uses-permission' array
+    if (!manifest.manifest['uses-permission']) {
+      manifest.manifest['uses-permission'] = [];
+    }
+    
+    const permissions = manifest.manifest['uses-permission'];
+    
+    // Shizuku permission - REQUIRED for elevated privileges
+    const shizukuPermission = {
+      $: {
+        'android:name': 'moe.shizuku.manager.permission.API_V23'
+      }
+    };
+    
+    // Check if Shizuku permission already exists
+    const hasShizukuPermission = permissions.some(
+      (p) => p.$ && p.$['android:name'] === 'moe.shizuku.manager.permission.API_V23'
+    );
+    
+    if (!hasShizukuPermission) {
+      permissions.push(shizukuPermission);
+      console.log('[withJarvisNativeSetup] Added Shizuku API_V23 permission');
+    }
+    
+    // ==================== ADD SERVICES ====================
     // Find the application tag
     const application = manifest.manifest.application;
     
@@ -138,27 +165,48 @@ const withJarvisPackage = (config) => {
       }
     }
     
-    // Add JarvisPackage to packages list
+    // Add JarvisPackage to packages list - MULTIPLE STRATEGIES
     if (isKotlin) {
-      // Kotlin MainApplication - find packages.add pattern
-      const packagesMatch = newContents.match(/(packages\.add\([^)]+\)\n?)/);
-      if (packagesMatch) {
-        newContents = newContents.replace(
-          packagesMatch[0],
-          packagesMatch[0] + '        packages.add(JarvisPackage())\n'
-        );
-      } else {
-        // Alternative: find the PackageList and add after
-        const listMatch = newContents.match(/(PackageList\(.*\)\.apply\s*\{[\s\S]*?packages\.add)/);
-        if (listMatch) {
-          const lastPackageAdd = newContents.lastIndexOf('packages.add(');
-          if (lastPackageAdd > -1) {
-            const endOfLine = newContents.indexOf('\n', lastPackageAdd);
-            if (endOfLine > -1) {
-              const beforeInsert = newContents.substring(0, endOfLine + 1);
-              const afterInsert = newContents.substring(endOfLine + 1);
-              newContents = beforeInsert + '            packages.add(JarvisPackage())\n' + afterInsert;
-            }
+      // Strategy 1: Find packages.add pattern and add after last one
+      const lastPackageAddMatch = newContents.lastIndexOf('packages.add(');
+      if (lastPackageAddMatch > -1) {
+        // Find the end of this line
+        const endOfLine = newContents.indexOf('\n', lastPackageAddMatch);
+        if (endOfLine > -1) {
+          const beforeInsert = newContents.substring(0, endOfLine + 1);
+          const afterInsert = newContents.substring(endOfLine + 1);
+          
+          // Check if JarvisPackage is already there
+          if (!afterInsert.includes('JarvisPackage') && !beforeInsert.substring(lastPackageAddMatch).includes('JarvisPackage')) {
+            newContents = beforeInsert + '            packages.add(JarvisPackage())\n' + afterInsert;
+            console.log('[withJarvisNativeSetup] Added JarvisPackage after existing packages.add');
+          }
+        }
+      }
+      
+      // Strategy 2: If no packages.add found, try PackageList pattern
+      if (!newContents.includes('JarvisPackage')) {
+        // Find PackageList().apply { or PackageList(this).apply {
+        const packageListMatch = newContents.match(/PackageList\([^)]*\)\.apply\s*\{/);
+        if (packageListMatch) {
+          const insertPos = newContents.indexOf(packageListMatch[0]) + packageListMatch[0].length;
+          const beforeInsert = newContents.substring(0, insertPos);
+          const afterInsert = newContents.substring(insertPos);
+          newContents = beforeInsert + '\n            packages.add(JarvisPackage())' + afterInsert;
+          console.log('[withJarvisNativeSetup] Added JarvisPackage inside PackageList.apply');
+        }
+      }
+      
+      // Strategy 3: Last resort - find the ReactPackage list initialization
+      if (!newContents.includes('JarvisPackage')) {
+        const packagesInitMatch = newContents.match(/val\s+packages\s*=\s*PackageList/);
+        if (packagesInitMatch) {
+          const endOfStatement = newContents.indexOf('}', newContents.indexOf(packagesInitMatch[0]));
+          if (endOfStatement > -1) {
+            const beforeInsert = newContents.substring(0, endOfStatement);
+            const afterInsert = newContents.substring(endOfStatement);
+            newContents = beforeInsert + '\n        packages.add(JarvisPackage())' + afterInsert;
+            console.log('[withJarvisNativeSetup] Added JarvisPackage after PackageList initialization');
           }
         }
       }
@@ -173,8 +221,13 @@ const withJarvisPackage = (config) => {
       }
     }
     
+    // Final check - ensure JarvisPackage was added
+    if (!newContents.includes('JarvisPackage')) {
+      console.error('[withJarvisNativeSetup] FAILED to add JarvisPackage - manual intervention required');
+    }
+    
     config.modResults.contents = newContents;
-    console.log('[withJarvisNativeSetup] Added JarvisPackage to MainApplication');
+    console.log('[withJarvisNativeSetup] MainApplication modification complete');
     
     return config;
   });
