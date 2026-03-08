@@ -2,7 +2,7 @@
   "expo": {
     "name": "JARVIS",
     "slug": "jarvis-ai-assistant",
-    "version": "1.0.0",
+    "version": "2.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -18,11 +18,11 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.jarvis.assistant",
-      "buildNumber": "1.0.0",
+      "buildNumber": "2.1.0",
       "infoPlist": {
         "NSSpeechRecognitionUsageDescription": "JARVIS needs speech recognition to understand your voice commands.",
         "NSMicrophoneUsageDescription": "JARVIS needs microphone access for voice input.",
-        "NSCameraUsageDescription": "JARVIS needs camera access to capture images for analysis.",
+        "NSCameraUsageDescription": "JARVIS needs camera access to capture images for analysis and hand gesture tracking.",
         "NSPhotoLibraryUsageDescription": "JARVIS needs photo library access to upload images."
       }
     },
@@ -32,13 +32,15 @@
         "backgroundColor": "#0a0a0f"
       },
       "package": "com.jarvis.assistant",
-      "versionCode": 1,
+      "versionCode": 21,
       "permissions": [
         "android.permission.RECORD_AUDIO",
         "android.permission.CAMERA",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.INTERNET"
+        "android.permission.INTERNET",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_SPECIAL_USE"
       ]
     },
     "web": {
@@ -64,6 +66,10 @@
         {
           "microphonePermission": "JARVIS needs access to your microphone for voice input."
         }
+      ],
+      [
+        "./plugins/withJarvisNativeSetup",
+        {}
       ]
     ]
   }

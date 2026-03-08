@@ -1,7 +1,11 @@
 /**
  * JARVIS Multi-API Routing System
  * Dynamic routing to multiple LLM cloud providers
- * PRODUCTION READY - Proper error handling and response parsing
+ * 
+ * CRITICAL: This module shows REAL error messages for debugging
+ * - No more "Sorry, an error occurred" hiding
+ * - Actual HTTP status codes and API error messages
+ * - Correct model endpoint IDs
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -241,41 +245,72 @@ export const APIKeyManager = {
 
 // ==================== ERROR HANDLING ====================
 
+/**
+ * API Error class that preserves ACTUAL error details
+ * NO MORE HIDING ERRORS!
+ */
 class APIError extends Error {
   constructor(
     message: string,
     public provider: string,
     public statusCode?: number,
-    public details?: string
+    public rawError?: string,
+    public responseBody?: string
   ) {
     super(message);
     this.name = 'APIError';
   }
 
+  /**
+   * Get user-friendly but DETAILED error message
+   * Shows actual HTTP status and error details
+   */
   toUserMessage(): string {
+    // Missing API key
     if (this.message.startsWith('NO_API_KEY:')) {
       const modelId = this.message.split(':')[1];
       const config = MODEL_CONFIGS[modelId as AIModel];
-      return `⚠️ Please add your ${config?.name || modelId} API key in Settings to use this model.`;
+      return `🔑 API Key Required\n\nPlease add your ${config?.name || modelId} API key in Settings.`;
     }
 
-    if (this.statusCode === 401 || this.statusCode === 403) {
-      return `❌ Invalid API key for ${this.provider}. Please check your key in Settings.`;
+    // HTTP status based errors with ACTUAL details
+    if (this.statusCode) {
+      const statusMessages: Record<number, string> = {
+        400: `❌ Bad Request (${this.statusCode})\n\n${this.rawError || 'Invalid request format'}`,
+        401: `🔑 Invalid API Key (${this.statusCode})\n\nYour ${this.provider} API key is invalid or expired.\nCheck your key in Settings.`,
+        403: `🚫 Forbidden (${this.statusCode})\n\n${this.rawError || 'Access denied. Check API key permissions.'}`,
+        404: `🔍 Not Found (${this.statusCode})\n\n${this.rawError || 'Model or endpoint not found.'}`,
+        429: `⏳ Rate Limited (${this.statusCode})\n\nYou've exceeded the rate limit for ${this.provider}.\nWait a moment and try again.`,
+        500: `🔧 Server Error (${this.statusCode})\n\n${this.provider} servers are experiencing issues.`,
+        502: `🔧 Bad Gateway (${this.statusCode})\n\n${this.provider} API is temporarily unavailable.`,
+        503: `🔧 Service Unavailable (${this.statusCode})\n\n${this.provider} is temporarily down. Try again later.`,
+      };
+
+      const baseMessage = statusMessages[this.statusCode] || 
+        `❌ HTTP ${this.statusCode}\n\n${this.rawError || 'Unknown error'}`;
+      
+      // Include raw error for debugging
+      if (this.responseBody && this.statusCode >= 400 && this.statusCode < 500) {
+        return `${baseMessage}\n\n📋 Details: ${this.responseBody.substring(0, 200)}`;
+      }
+      
+      return baseMessage;
     }
 
-    if (this.statusCode === 429) {
-      return `⏳ Rate limit exceeded for ${this.provider}. Please wait and try again.`;
+    // Network errors
+    if (this.message.includes('Network request failed') || 
+        this.message.includes('network') || 
+        this.message.includes('fetch')) {
+      return `📡 Network Error\n\n${this.message}\n\nCheck your internet connection.`;
     }
 
-    if (this.statusCode && this.statusCode >= 500) {
-      return `🔧 ${this.provider} servers are experiencing issues. Please try again later.`;
+    // Timeout
+    if (this.message.includes('timeout') || this.message.includes('Timeout')) {
+      return `⏱️ Request Timeout\n\nThe request took too long. Try again.`;
     }
 
-    if (this.message.includes('network') || this.message.includes('fetch')) {
-      return `📡 Network error. Please check your internet connection.`;
-    }
-
-    return `❌ ${this.provider} API Error: ${this.details || this.message}`;
+    // Default: show the ACTUAL error message
+    return `❌ ${this.provider} Error\n\n${this.rawError || this.message}`;
   }
 }
 
@@ -319,10 +354,10 @@ class MultiAPIClient {
       }
     } catch (error) {
       if (error instanceof APIError) throw error;
-      throw new APIError(
-        error instanceof Error ? error.message : 'Unknown error',
-        config.provider
-      );
+      
+      // Preserve original error message
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      throw new APIError(errorMsg, config.provider, undefined, errorMsg);
     }
   }
 
@@ -355,10 +390,8 @@ class MultiAPIClient {
       }
     } catch (error) {
       if (error instanceof APIError) throw error;
-      throw new APIError(
-        error instanceof Error ? error.message : 'Unknown error',
-        config.provider
-      );
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      throw new APIError(errorMsg, config.provider, undefined, errorMsg);
     }
   }
 
@@ -367,6 +400,9 @@ class MultiAPIClient {
   }
 
   // ==================== GEMINI API ====================
+  // Uses CORRECT model IDs:
+  // - gemini-2.5-flash → gemini-2.0-flash
+  // - gemini-2.5-pro → gemini-2.5-pro-preview-06-05
 
   private async geminiChat(
     model: AIModel,
@@ -376,10 +412,10 @@ class MultiAPIClient {
   ): Promise<string> {
     this.abortController = new AbortController();
     
-    // Use correct model IDs
+    // CORRECT model IDs for Gemini API
     const modelId = model === 'gemini-2.5-pro' 
       ? 'gemini-2.5-pro-preview-06-05' 
-      : 'gemini-2.0-flash';
+      : 'gemini-2.0-flash';  // Correct endpoint!
     
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`;
 
@@ -393,40 +429,81 @@ class MultiAPIClient {
       body.systemInstruction = { parts: [{ text: systemPrompt }] };
     }
 
-    console.log(`[Gemini] Sending request to ${modelId}`);
+    console.log(`[Gemini] Request to model: ${modelId}`);
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: this.abortController.signal,
-    });
-
-    const data = await response.json();
-    console.log('[Gemini] Response status:', response.status);
-
-    if (!response.ok) {
-      const errorMsg = data.error?.message || JSON.stringify(data.error) || 'Unknown error';
-      throw new APIError(errorMsg, 'Google', response.status, errorMsg);
+    let response: Response;
+    let responseText: string;
+    
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: this.abortController.signal,
+      });
+      
+      responseText = await response.text();
+    } catch (fetchError: any) {
+      // Network/abort errors
+      if (fetchError.name === 'AbortError') {
+        throw new APIError('Request cancelled', 'Google');
+      }
+      throw new APIError(
+        `Network Error: ${fetchError.message}`,
+        'Google',
+        undefined,
+        fetchError.message
+      );
     }
 
-    // PROPER RESPONSE PARSING
+    // Parse response
+    let data: any;
+    try {
+      data = JSON.parse(responseText);
+    } catch (parseError) {
+      throw new APIError(
+        'Invalid JSON response',
+        'Google',
+        response.status,
+        responseText.substring(0, 500)
+      );
+    }
+
+    // Handle non-200 responses with ACTUAL error details
+    if (!response.ok) {
+      const errorMsg = data.error?.message || data.error?.status || responseText.substring(0, 300);
+      throw new APIError(
+        `API Error: ${errorMsg}`,
+        'Google',
+        response.status,
+        errorMsg,
+        responseText.substring(0, 500)
+      );
+    }
+
+    // Extract text from response
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
     
-    if (!text || text.trim() === '') {
-      console.error('[Gemini] Empty or invalid response:', JSON.stringify(data, null, 2));
-      
+    if (!text) {
       // Check for blocked content
       if (data?.promptFeedback?.blockReason) {
         throw new APIError(
-          'Content blocked by safety filters',
+          `Content blocked: ${data.promptFeedback.blockReason}`,
           'Google',
           response.status,
           `Block reason: ${data.promptFeedback.blockReason}`
         );
       }
       
-      throw new APIError('Empty response from API', 'Google', response.status);
+      // Log full response for debugging
+      console.error('[Gemini] Empty response:', JSON.stringify(data, null, 2));
+      throw new APIError(
+        'Empty response from API',
+        'Google',
+        response.status,
+        'Response had no candidates',
+        JSON.stringify(data).substring(0, 500)
+      );
     }
 
     return text;
@@ -464,13 +541,20 @@ class MultiAPIClient {
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new APIError('Stream request failed', 'Google', response.status, error);
+      const errorText = await response.text();
+      let errorMsg = `HTTP ${response.status}`;
+      try {
+        const errorJson = JSON.parse(errorText);
+        errorMsg = errorJson.error?.message || errorMsg;
+      } catch (e) {
+        errorMsg = errorText.substring(0, 200);
+      }
+      throw new APIError(`Stream failed: ${errorMsg}`, 'Google', response.status, errorMsg);
     }
 
     const reader = response.body?.getReader();
     if (!reader) {
-      throw new APIError('No response body', 'Google');
+      throw new APIError('No response body for stream', 'Google');
     }
 
     const decoder = new TextDecoder();
@@ -496,7 +580,8 @@ class MultiAPIClient {
           const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
           if (text) yield text;
         } catch (e) {
-          console.warn('[Gemini Stream] Parse error:', e);
+          // Log parse errors but continue
+          console.warn('[Gemini Stream] Parse error:', jsonStr.substring(0, 100));
         }
       }
     }
@@ -513,6 +598,7 @@ class MultiAPIClient {
   ): Promise<string> {
     this.abortController = new AbortController();
 
+    // Claude model IDs
     const claudeModel = model === 'claude-opus-4' 
       ? 'claude-opus-4-20250514' 
       : 'claude-sonnet-4-20250514';
@@ -532,33 +618,69 @@ class MultiAPIClient {
       body.system = systemPrompt;
     }
 
-    console.log(`[Claude] Sending request to ${claudeModel}`);
+    console.log(`[Claude] Request to model: ${claudeModel}`);
 
-    const response = await fetch(`${baseUrl}/messages`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify(body),
-      signal: this.abortController.signal,
-    });
-
-    const data = await response.json();
-    console.log('[Claude] Response status:', response.status);
-
-    if (!response.ok) {
-      const errorMsg = data.error?.message || JSON.stringify(data.error) || 'Unknown error';
-      throw new APIError(errorMsg, 'Anthropic', response.status, errorMsg);
+    let response: Response;
+    let responseText: string;
+    
+    try {
+      response = await fetch(`${baseUrl}/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify(body),
+        signal: this.abortController.signal,
+      });
+      
+      responseText = await response.text();
+    } catch (fetchError: any) {
+      if (fetchError.name === 'AbortError') {
+        throw new APIError('Request cancelled', 'Anthropic');
+      }
+      throw new APIError(
+        `Network Error: ${fetchError.message}`,
+        'Anthropic',
+        undefined,
+        fetchError.message
+      );
     }
 
-    // PROPER RESPONSE PARSING for Claude
+    let data: any;
+    try {
+      data = JSON.parse(responseText);
+    } catch (parseError) {
+      throw new APIError(
+        'Invalid JSON response',
+        'Anthropic',
+        response.status,
+        responseText.substring(0, 500)
+      );
+    }
+
+    if (!response.ok) {
+      const errorMsg = data.error?.message || data.error?.type || responseText.substring(0, 300);
+      throw new APIError(
+        `API Error: ${errorMsg}`,
+        'Anthropic',
+        response.status,
+        errorMsg,
+        responseText.substring(0, 500)
+      );
+    }
+
     const text = data?.content?.[0]?.text;
     
-    if (!text || text.trim() === '') {
+    if (!text) {
       console.error('[Claude] Empty response:', JSON.stringify(data, null, 2));
-      throw new APIError('Empty response from API', 'Anthropic', response.status);
+      throw new APIError(
+        'Empty response from API',
+        'Anthropic',
+        response.status,
+        'No content in response'
+      );
     }
 
     return text;
@@ -605,13 +727,13 @@ class MultiAPIClient {
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new APIError('Stream request failed', 'Anthropic', response.status, error);
+      const errorText = await response.text();
+      throw new APIError(`Stream failed: HTTP ${response.status}`, 'Anthropic', response.status, errorText);
     }
 
     const reader = response.body?.getReader();
     if (!reader) {
-      throw new APIError('No response body', 'Anthropic');
+      throw new APIError('No response body for stream', 'Anthropic');
     }
 
     const decoder = new TextDecoder();
@@ -636,7 +758,7 @@ class MultiAPIClient {
             yield json.delta.text;
           }
         } catch (e) {
-          // Ignore parse errors for incomplete chunks
+          // Continue on parse errors
         }
       }
     }
@@ -659,41 +781,78 @@ class MultiAPIClient {
       ? [{ role: 'system' as const, content: systemPrompt }, ...messages]
       : messages;
 
-    console.log(`[GLM] Sending request to ${glmModel}`);
+    console.log(`[GLM] Request to model: ${glmModel}`);
 
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: glmModel,
-        messages: allMessages,
-      }),
-      signal: this.abortController.signal,
-    });
-
-    const data = await response.json();
-    console.log('[GLM] Response status:', response.status);
-
-    if (!response.ok) {
-      const errorMsg = data.error?.message || data.message || JSON.stringify(data);
-      throw new APIError(errorMsg, 'Zhipu AI', response.status, errorMsg);
+    let response: Response;
+    let responseText: string;
+    
+    try {
+      response = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: glmModel,
+          messages: allMessages,
+        }),
+        signal: this.abortController.signal,
+      });
+      
+      responseText = await response.text();
+    } catch (fetchError: any) {
+      if (fetchError.name === 'AbortError') {
+        throw new APIError('Request cancelled', 'Zhipu AI');
+      }
+      throw new APIError(
+        `Network Error: ${fetchError.message}`,
+        'Zhipu AI',
+        undefined,
+        fetchError.message
+      );
     }
 
-    // PROPER RESPONSE PARSING for OpenAI-compatible format
+    let data: any;
+    try {
+      data = JSON.parse(responseText);
+    } catch (parseError) {
+      throw new APIError(
+        'Invalid JSON response',
+        'Zhipu AI',
+        response.status,
+        responseText.substring(0, 500)
+      );
+    }
+
+    if (!response.ok) {
+      const errorMsg = data.error?.message || data.message || responseText.substring(0, 300);
+      throw new APIError(
+        `API Error: ${errorMsg}`,
+        'Zhipu AI',
+        response.status,
+        errorMsg,
+        responseText.substring(0, 500)
+      );
+    }
+
     const text = data?.choices?.[0]?.message?.content;
     
-    if (!text || text.trim() === '') {
+    if (!text) {
       console.error('[GLM] Empty response:', JSON.stringify(data, null, 2));
-      throw new APIError('Empty response from API', 'Zhipu AI', response.status);
+      throw new APIError(
+        'Empty response from API',
+        'Zhipu AI',
+        response.status,
+        'No choices in response'
+      );
     }
 
     return text;
   }
 
   // ==================== OPENAI-COMPATIBLE API ====================
+  // Used by: Kimi, Grok, DeepSeek
 
   private async openaiCompatibleChat(
     baseUrl: string,
@@ -708,42 +867,80 @@ class MultiAPIClient {
       ? [{ role: 'system' as const, content: systemPrompt }, ...messages]
       : messages;
 
-    // Model ID mapping
+    // Model ID mappings
     let modelId = model;
     if (model === 'kimi-2.5') modelId = 'moonshot-v1-8k';
     if (model === 'grok-2') modelId = 'grok-2-latest';
     if (model === 'grok-2-vision') modelId = 'grok-2-vision-latest';
+    if (model === 'deepseek-chat') modelId = 'deepseek-chat';
+    if (model === 'deepseek-reasoner') modelId = 'deepseek-reasoner';
 
     const provider = MODEL_CONFIGS[model].provider;
-    console.log(`[${provider}] Sending request to ${modelId}`);
+    console.log(`[${provider}] Request to model: ${modelId}`);
 
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: modelId,
-        messages: allMessages,
-      }),
-      signal: this.abortController.signal,
-    });
-
-    const data = await response.json();
-    console.log(`[${provider}] Response status:`, response.status);
-
-    if (!response.ok) {
-      const errorMsg = data.error?.message || data.message || JSON.stringify(data);
-      throw new APIError(errorMsg, provider, response.status, errorMsg);
+    let response: Response;
+    let responseText: string;
+    
+    try {
+      response = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: modelId,
+          messages: allMessages,
+        }),
+        signal: this.abortController.signal,
+      });
+      
+      responseText = await response.text();
+    } catch (fetchError: any) {
+      if (fetchError.name === 'AbortError') {
+        throw new APIError('Request cancelled', provider);
+      }
+      throw new APIError(
+        `Network Error: ${fetchError.message}`,
+        provider,
+        undefined,
+        fetchError.message
+      );
     }
 
-    // PROPER RESPONSE PARSING
+    let data: any;
+    try {
+      data = JSON.parse(responseText);
+    } catch (parseError) {
+      throw new APIError(
+        'Invalid JSON response',
+        provider,
+        response.status,
+        responseText.substring(0, 500)
+      );
+    }
+
+    if (!response.ok) {
+      const errorMsg = data.error?.message || data.message || responseText.substring(0, 300);
+      throw new APIError(
+        `API Error: ${errorMsg}`,
+        provider,
+        response.status,
+        errorMsg,
+        responseText.substring(0, 500)
+      );
+    }
+
     const text = data?.choices?.[0]?.message?.content;
     
-    if (!text || text.trim() === '') {
+    if (!text) {
       console.error(`[${provider}] Empty response:`, JSON.stringify(data, null, 2));
-      throw new APIError('Empty response from API', provider, response.status);
+      throw new APIError(
+        'Empty response from API',
+        provider,
+        response.status,
+        'No choices in response'
+      );
     }
 
     return text;
@@ -766,6 +963,8 @@ class MultiAPIClient {
     if (model === 'kimi-2.5') modelId = 'moonshot-v1-8k';
     if (model === 'grok-2') modelId = 'grok-2-latest';
     if (model === 'grok-2-vision') modelId = 'grok-2-vision-latest';
+    if (model === 'deepseek-chat') modelId = 'deepseek-chat';
+    if (model === 'deepseek-reasoner') modelId = 'deepseek-reasoner';
 
     const provider = MODEL_CONFIGS[model].provider;
 
@@ -784,13 +983,13 @@ class MultiAPIClient {
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new APIError('Stream request failed', provider, response.status, error);
+      const errorText = await response.text();
+      throw new APIError(`Stream failed: HTTP ${response.status}`, provider, response.status, errorText);
     }
 
     const reader = response.body?.getReader();
     if (!reader) {
-      throw new APIError('No response body', provider);
+      throw new APIError('No response body for stream', provider);
     }
 
     const decoder = new TextDecoder();
@@ -816,7 +1015,7 @@ class MultiAPIClient {
           const text = json?.choices?.[0]?.delta?.content;
           if (text) yield text;
         } catch (e) {
-          // Ignore parse errors
+          // Continue on parse errors
         }
       }
     }

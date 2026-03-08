@@ -46,9 +46,13 @@ coverage/
 *.swp
 *.swo
 
-# Build outputs
-android/
-ios/
+# Build outputs (generated native code)
+# Keep our native module source files in src/native/
+/android/
+/ios/
 *.apk
 *.aab
 *.ipa
+
+# But track the native module source files for config plugin
+!src/native/android/
